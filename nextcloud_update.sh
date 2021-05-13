@@ -34,15 +34,25 @@ is_process_running dpkg
 if does_snapshot_exist "NcVM-snapshot-pending"
 then
     msg_box "Cannot proceed with the update currently because NcVM-snapshot-pending exists.\n
-It is possible that a backup is currently running.\n
-Advice: don't restart your system now if that is the case!"
-    # Don't exit the script while the snapshot exists to disable any automatic restart during backups
-    while does_snapshot_exist "NcVM-snapshot-pending"
-    do
-        print_text_in_color "$ICyan" "Waiting for NcVM-snapshot-pending to vanish... (press '[CTRL] + [C]' to cancel)"
-        sleep 5
-    done
-    print_text_in_color "$ICyan" "Continuing the update..."
+It is possible that a backup is currently running or an update wasn't successful.\n
+Advice: don't restart your system now if that is the case!\n
+If you are sure that no update or backup is currently running, you can fix this by rebooting your server."
+    # Kill all "$SCRIPTS/update.sh" processes to make sure that no automatic restart happens after exiting this script
+    # shellcheck disable=2009
+    PROCESS_IDS=$(ps aux | grep "$SCRIPTS/update.sh" | grep -v grep | awk '{print $2}')
+    if [ -n "$PROCESS_IDS" ]
+    then
+        mapfile -t PROCESS_IDS <<< "$PROCESS_IDS"
+        for process in "${PROCESS_IDS[@]}"
+        do
+            print_text_in_color "$ICyan" "Killing the process with PID $process to prevent a potential automatic restart..."
+            if ! kill "$process"
+            then
+                print_text_in_color "$IRed" "Couldn't kill the process with PID $process..."
+            fi
+        done
+    fi
+    exit 1
 fi
 
 # Create a snapshot before doing anything else
@@ -50,6 +60,10 @@ check_free_space
 if ! [ -f "$SCRIPTS/nextcloud-startup-script.sh" ] && (does_snapshot_exist "NcVM-startup" \
 || does_snapshot_exist "NcVM-snapshot" || [ "$FREE_SPACE" -ge 50 ] )
 then
+    # Add automatical unlock upon reboot
+    crontab -u root -l | grep -v "lvrename /dev/ubuntu-vg/NcVM-snapshot-pending"  | crontab -u root -
+    crontab -u root -l | { cat; echo "@reboot /usr/sbin/lvrename /dev/ubuntu-vg/NcVM-snapshot-pending \
+/dev/ubuntu-vg/NcVM-snapshot &>/dev/null" ; } | crontab -u root -
     SNAPSHOT_EXISTS=1
     if is_docker_running
     then
@@ -109,6 +123,11 @@ https://shop.hanssonit.se/product/premium-support-per-30-minutes/"
     fi
 fi
 
+# Remove leftovers
+rm -f /root/php-upgrade.sh
+rm -f /tmp/php-upgrade.sh
+rm -f /root/db-migration.sh
+
 # Ubuntu 16.04 is deprecated
 check_distro_version
 
@@ -120,6 +139,8 @@ then
     print_text_in_color "$ICyan" "Ondrejs PPA is installed. \
 Holding PHP to avoid upgrading to a newer version without migration..."
     apt-mark hold php*
+    #check_php
+    #apt-mark unhold php"$PHPVER"*
 fi
 
 # Don't allow MySQL/MariaDB
@@ -230,6 +251,24 @@ then
     fi
 fi
 
+# Reinstall certbot (use snap instead of package)
+# https://askubuntu.com/a/1271565
+if dpkg -l | grep certbot >/dev/null 2>&1
+then
+    # certbot will be removed, but still listed, so we need to check if the snap is installed as well so that this doesn't run every time
+    if ! snap list certbot >/dev/null 2>&1
+    then
+        print_text_in_color "$ICyan" "Reinstalling certbot (Let's Encrypt) as a snap instead..."
+        apt remove certbot -y
+        apt autoremove -y
+        install_if_not snapd
+        snap install core
+        snap install certbot --classic
+        # Update $PATH in current session (login and logout is required otherwise)
+        check_command hash -r
+    fi
+fi
+
 # Fix PHP error message
 mkdir -p /tmp/pear/cache
 
@@ -250,11 +289,22 @@ then
     yes no | pecl upgrade redis
     systemctl restart redis-server.service
 fi
-
-# Double check if redis.so is enabled
-if ! grep -qFx extension=redis.so "$PHP_INI"
+# Remove old redis
+if grep -qFx extension=redis.so "$PHP_INI"
 then
-    echo "extension=redis.so" >> "$PHP_INI"
+    sed -i "/extension=redis.so/d" "$PHP_INI"
+fi
+# Check if redis is enabled and create the file if not
+if [ ! -f $PHP_MODS_DIR/redis.ini ]
+then
+    touch $PHP_MODS_DIR/redis.ini
+fi
+# Enable new redis
+if ! grep -qFx extension=redis.so $PHP_MODS_DIR/redis.ini
+then
+    echo "# PECL redis" > $PHP_MODS_DIR/redis.ini
+    echo "extension=redis.so" >> $PHP_MODS_DIR/redis.ini
+    check_command phpenmod -v ALL redis
 fi
 
 # Upgrade APCu and igbinary
@@ -266,10 +316,22 @@ then
         if pecl list | grep igbinary >/dev/null 2>&1
         then
             yes no | pecl upgrade igbinary
-            # Check if igbinary.so is enabled
-            if ! grep -qFx extension=igbinary.so "$PHP_INI"
+            # Remove old igbinary
+            if grep -qFx extension=igbinary.so "$PHP_INI"
             then
-                echo "extension=igbinary.so" >> "$PHP_INI"
+                sed -i "/extension=igbinary.so/d" "$PHP_INI"
+            fi
+            # Check if igbinary is enabled and create the file if not
+            if [ ! -f $PHP_MODS_DIR/igbinary.ini ]
+            then
+                touch $PHP_MODS_DIR/igbinary.ini
+            fi
+            # Enable new igbinary
+            if ! grep -qFx extension=igbinary.so $PHP_MODS_DIR/igbinary.ini
+            then
+                echo "# PECL igbinary" > $PHP_MODS_DIR/igbinary.ini
+                echo "extension=igbinary.so" >> $PHP_MODS_DIR/igbinary.ini
+                check_command phpenmod -v ALL igbinary
             fi
         fi
         if pecl list | grep -q smbclient
@@ -290,25 +352,53 @@ then
             # Remove old smbclient
             if grep -qFx extension=smbclient.so "$PHP_INI"
             then
-                sed -i "s|extension=smbclient.so||g" "$PHP_INI"
+                sed -i "/extension=smbclient.so/d" "$PHP_INI"
             fi
         fi
         if pecl list | grep -q apcu
         then
             yes no | pecl upgrade apcu
-            # Check if apcu.so is enabled
-            if ! grep -qFx extension=apcu.so "$PHP_INI"
+            # Remove old igbinary
+            if grep -qFx extension=apcu.so "$PHP_INI"
             then
-                echo "extension=apcu.so" >> "$PHP_INI"
+                sed -i "/extension=apcu.so/d" "$PHP_INI"
+            fi
+            # Check if apcu is enabled and create the file if not
+            if [ ! -f $PHP_MODS_DIR/apcu.ini ]
+            then
+                touch $PHP_MODS_DIR/apcu.ini
+            fi
+            # Enable new apcu
+            if ! grep -qFx extension=apcu.so $PHP_MODS_DIR/apcu.ini
+            then
+                echo "# PECL apcu" > $PHP_MODS_DIR/apcu.ini
+                echo "extension=apcu.so" >> $PHP_MODS_DIR/apcu.ini
+                check_command phpenmod -v ALL apcu
+            fi
+            # Fix https://help.nextcloud.com/t/nc-21-manual-update-issues/108693/4?$
+            if ! grep -qFx apc.enable_cli=1 $PHP_MODS_DIR/apcu.ini
+            then
+                echo "apc.enable_cli=1" >> $PHP_MODS_DIR/apcu.ini
+                check_command phpenmod -v ALL apcu
             fi
         fi
         if pecl list | grep -q inotify
         then 
-            yes no | pecl upgrade inotify
-            # Check if inotify.so is enabled
-            if ! grep -qFx extension=inotify.so "$PHP_INI"
+            # Remove old inotify
+            if grep -qFx extension=inotify.so "$PHP_INI"
             then
-                echo "extension=inotify.so" >> "$PHP_INI"
+                sed -i "/extension=inotify.so/d" "$PHP_INI"
+            fi
+            yes no | pecl upgrade inotify
+            if [ ! -f $PHP_MODS_DIR/inotify.ini ]
+            then
+                touch $PHP_MODS_DIR/inotify.ini
+            fi
+            if ! grep -qFx extension=inotify.so $PHP_MODS_DIR/inotify.ini
+            then
+                echo "# PECL inotify" > $PHP_MODS_DIR/inotify.ini
+                echo "extension=inotify.so" >> $PHP_MODS_DIR/inotify.ini
+                check_command phpenmod -v ALL inotify
             fi
         fi
     fi
@@ -366,15 +456,15 @@ we have removed Watchtower from this server. Updates will now happen for each co
     fi
     # Update selected images
     # Bitwarden RS
-    docker_update_specific 'bitwardenrs/server' "Bitwarden RS"
+    docker_update_specific 'bitwarden_rs' "Bitwarden RS"
     # Collabora CODE
-    docker_update_specific 'collabora/code' 'Collabora'
+    docker_update_specific 'code' 'Collabora'
     # OnlyOffice
-    docker_update_specific 'onlyoffice/documentserver' 'OnlyOffice'
+    docker_update_specific 'onlyoffice' 'OnlyOffice'
     # Full Text Search
-    docker_update_specific 'ark74/nc_fts' 'Full Text Search'
+    docker_update_specific 'fts_esror' 'Full Text Search'
     # Plex
-    docker_update_specific 'plexinc/pms-docker' "Plex Media Server"
+    docker_update_specific 'plex' "Plex Media Server"
 fi
 
 # Cleanup un-used packages
@@ -449,6 +539,18 @@ then
     export NCVERSION
     export STABLEVERSION="nextcloud-$NCVERSION"
     rm -f /tmp/minor.version
+elif [ -f /tmp/nextmajor.version ]
+then
+    NCBAD=$(cat /tmp/nextmajor.version)
+    NCVERSION=$(curl -s -m 900 $NCREPO/ | sed --silent 's/.*href="nextcloud-\([^"]\+\).zip.asc".*/\1/p' | sort --version-sort | grep $NCNEXT | tail -1)
+    if [ -z "$NCVERSION" ]
+    then
+        msg_box "The version that you are trying to upgrade to doesn't exist."
+        exit 1
+    fi
+    export NCVERSION
+    export STABLEVERSION="nextcloud-$NCVERSION"
+    rm -f /tmp/nextmajor.version
 elif [ -f /tmp/prerelease.version ]
 then
     PRERELEASE_VERSION=yes
@@ -518,7 +620,7 @@ fi
 DONOTUPDATETO='20.0.6'
 if [[ "$NCVERSION" == "$DONOTUPDATETO" ]]
 then
-    msg_box "Due to serious bugs with version $DONOTUPDATETO we won't upgrade to that version."
+    msg_box "Due to serious bugs with Nextcloud $DONOTUPDATETO we won't upgrade to that version."
     exit
 fi
 
@@ -601,7 +703,6 @@ check_command systemctl stop apache2.service
 # Create backup dir (/mnt/NCBACKUP/)
 if [ ! -d "$BACKUP" ]
 then
-    BACKUP=/var/NCBACKUP
     mkdir -p $BACKUP
 fi
 
@@ -619,6 +720,19 @@ then
     fi
 fi
 
+# Prevent apps from breaking the update due to incompatibility
+# Fixes errors like https://github.com/nextcloud/vm/issues/1834
+# Needs to be executed before backing up the config directory
+if [ "${CURRENTVERSION%%.*}" -lt "${NCVERSION%%.*}" ]
+then
+    print_text_in_color "$ICyan" "Deleting 'app_install_overwrite array' to prevent app breakage..."
+    nextcloud_occ config:system:delete app_install_overwrite
+fi
+
+# Move backups to location according to $VAR
+mv /var/NCBACKUP/ "$BACKUP"
+mv /var/NCBACKUP-OLD/ "$BACKUP"-OLD
+
 # Check if backup exists and move to old
 print_text_in_color "$ICyan" "Backing up data..."
 DATE=$(date +%Y-%m-%d-%H%M%S)
@@ -627,7 +741,9 @@ then
     mkdir -p "$BACKUP"-OLD/"$DATE"
     install_if_not rsync
     rsync -Aaxz "$BACKUP"/ "$BACKUP"-OLD/"$DATE"
-    rm -R "$BACKUP"
+    DATE=$(date --date='1 year ago' +%Y)
+    rm -rf /var/NCBACKUP-OLD/"$DATE"*
+    rm -rf "$BACKUP"
     mkdir -p "$BACKUP"
 fi
 
@@ -715,6 +831,14 @@ then
     then
         nextcloud_occ db:add-missing-primary-keys
     fi
+    if [ "${CURRENTVERSION%%.*}" -ge "21" ]
+    then
+        # Set phone region
+        if [ -n "$KEYBOARD_LAYOUT" ]
+        then
+            nextcloud_occ config:system:set default_phone_region --value="$KEYBOARD_LAYOUT"
+        fi
+    fi
 else
     msg_box "Something went wrong with backing up your old Nextcloud instance
 Please check in $BACKUP if the folders exist."
@@ -769,9 +893,6 @@ then
     fi
 fi
 
-# Recover apps that exists in the backed up apps folder
-run_script STATIC recover_apps
-
 # Restore app status
 # Fixing https://github.com/nextcloud/server/issues/4538
 if [ "${APPSTORAGE[0]}" != "no-export-done" ]
@@ -781,12 +902,40 @@ then
     do
         if [ -n "${APPSTORAGE[$app]}" ]
         then
-            if echo "${APPSTORAGE[$app]}" | grep -q "^\[\".*\"\]$"
+            # Check if the app is in Nextclouds app storage
+            if ! [ -d "$NC_APPS_PATH/$app" ]
             then
-                if is_app_enabled "$app"
+                # If the app is missing from the apps folder and was installed and enabled before the upgrade was done,
+                # then reinstall it
+                if [ "${APPSTORAGE[$app]}" = "yes" ]
                 then
-                    nextcloud_occ_no_check config:app:set "$app" enabled --value="${APPSTORAGE[$app]}"
+                    install_and_enable_app "$app"
+                # If the app is missing from the apps folder and was installed but not enabled before the upgrade was done, 
+                # then reinstall it but keep it disabled
+                elif [ "${APPSTORAGE[$app]}" = "no" ]
+                then
+                    install_and_enable_app "$app"
+                    nextcloud_occ_no_check app:disable "$app"
                 fi
+            fi
+            # If the app still isn't enabled (maybe because it's incompatible), then at least restore from backup,
+            # and make sure it's disabled
+            if ! [ -d "$NC_APPS_PATH/$app" ] && [ -d "$BACKUP/apps/$app" ]
+            then
+                if yesno_box_no "$app couln't be enabled. Do you want to restore it from backup?\n\nWARNING: It may result in failed integrity checks."
+                then
+                    print_text_in_color "$ICyan" "Restoring $app from $BACKUP/apps..."
+                    rsync -Aaxz "$BACKUP/apps/$app" "$NC_APPS_PATH/"
+                    bash "$SECURE"
+                    nextcloud_occ_no_check app:disable "$app"
+                    nextcloud_occ upgrade
+                fi
+            fi
+            # Cover the case where the app is enabled for certain groups
+            if [ "${APPSTORAGE[$app]}" != "yes" ] && [ "${APPSTORAGE[$app]}" != "no" ] && is_app_enabled "$app"
+            then
+                # Only restore the group settings, if the app was enabled (and is thus compatible with the new NC version)
+                nextcloud_occ_no_check config:app:set "$app" enabled --value="${APPSTORAGE[$app]}"
             fi
         fi
     done
@@ -857,5 +1006,23 @@ Maintenance mode is kept on."
     "Nextcloud update failed!" \
     "Your Nextcloud update failed, please check the logs at $VMLOGS/update.log"
     nextcloud_occ status
+    if [ -n "$SNAPSHOT_EXISTS" ]
+    then
+        # Kill all "$SCRIPTS/update.sh" processes to make sure that no automatic restart happens after exiting this script
+        # shellcheck disable=2009
+        PROCESS_IDS_NEW=$(ps aux | grep "$SCRIPTS/update.sh" | grep -v grep | awk '{print $2}')
+        if [ -n "$PROCESS_IDS_NEW" ]
+        then
+            mapfile -t PROCESS_IDS_NEW <<< "$PROCESS_IDS_NEW"
+            for process in "${PROCESS_IDS_NEW[@]}"
+            do
+                print_text_in_color "$ICyan" "Killing the process with PID $process to prevent a potential automatic restart..."
+                if ! kill "$process"
+                then
+                    print_text_in_color "$IRed" "Couldn't kill the process with PID $process..."
+                fi
+            done
+        fi
+    fi
     exit 1
 fi

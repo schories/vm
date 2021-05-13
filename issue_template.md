@@ -14,10 +14,10 @@ Thank you!
 2.
 3.
 
-## Expected behaviour
+## Expected behavior
 Tell us what should happen
 
-## Actual behaviour
+## Actual behavior
 Tell us what happens instead
 
 ## Server configuration
@@ -25,6 +25,8 @@ Tell us what happens instead
 **Nextcloud server version:** (see your admin page)
 
 **Server OS** (Ubuntu server is default)
+
+**PHP Version** (e.g. 7.4)
 
 **How did you install the VM?** (Scripted install from master **OR** Released version)
 

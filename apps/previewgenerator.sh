@@ -48,7 +48,7 @@ else
     # reset the cronjob
     crontab -u www-data -l | grep -v 'preview:pre-generate'  | crontab -u www-data -
     # Remove apps
-    APPS=(ffmpeg php-imagick libmagickcore-6.q16-3-extra)
+    APPS=(php-imagick libmagickcore-6.q16-3-extra)
     for app in "${APPS[@]}"
     do
         if is_this_installed "$app"
@@ -56,6 +56,10 @@ else
             apt purge "$app" -y
         fi
     done
+    if is_this_installed ffmpeg && ! is_app_installed integration_whiteboard
+    then
+        apt purge ffmpeg -y
+    fi
     apt autoremove -y
     # Show successful uninstall if applicable
     removal_popup "$SCRIPT_NAME"
@@ -234,7 +238,7 @@ fi
 msg_box "In the last step you can define a specific Nextcloud user for \
 which will be the user that runs the Preview Generation.
 
-The default behaviour (just hit [ENTER]) is to run with the \
+The default behavior (just hit [ENTER]) is to run with the \
 system user 'www-data' which will generate previews for all users.
 
 If you on the other hand choose to use a specific user, previews will ONLY be generated for that specific user."

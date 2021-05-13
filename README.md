@@ -13,7 +13,14 @@ Server installation. Simplified. :cloud:
 #### All Systems Go
 > NcVM can check for and install _stable_ updates to keep things current, smooth, and secure.
 
+
 --------------------
+
+## FYI
+
+Developed by [Daniel Hansson](https://github.com/enoch85) and the Nextcloud community. Nextcloud GmbH does not offer support for the VM in the [master branch](https://github.com/nextcloud/vm/tree/master) (full-version), as we only support manual tarball/zip-package installations. You can download the official Nextcloud VM appliance ([also from this repo](https://github.com/nextcloud/vm/tree/official-basic-vm)) from [our website](https://download.nextcloud.com/vm/Official-Nextcloud-VM.zip) to get a stripped down version for testing if you rather want to skip all the manual steps in our documentation.
+
+If you want support regarding the full-version VM in master, please contact our partner [Hansson IT](https://www.hanssonit.se/nextcloud-vm).
 
 ## Dependencies:
 (Ubuntu Server 20.04 LTS 64-bit)
@@ -45,7 +52,7 @@ Server installation. Simplified. :cloud:
 ## I want to test a Release Candidate (RC), or Beta!
 No problem, brave explorer! We made it simple. 
 
-In some cases we do pre-releases of the VM as well. Those can be found in the [TESTING](https://cloud.hanssonit.se/s/zjsqkrSpzqJGE9N?path=%2FTESTING) folder on the download server. 
+In some cases we do pre-releases of the VM as well. Those can be found in the [TESTING](https://cloud.kafit.se/s/7qzap5RL6EF3RyZ?path=%2FTESTING) folder on the download server. 
 
 If you want to try the latest version yourself, there are two variables that you could use:
 

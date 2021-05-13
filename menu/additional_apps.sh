@@ -42,15 +42,20 @@ $CHECKLIST_GUIDE\n\n$RUN_LATER_GUIDE" "$WT_HEIGHT" "$WT_WIDTH" 4 \
 "Bitwarden" "(External password manager)" OFF \
 "Fail2ban  " "(Extra Bruteforce protection)" "$STARTUP_SWITCH" \
 "Adminer" "(PostgreSQL GUI)" OFF \
-"ClamAV" "(Antivirus for Nextcloud and files)" OFF \
+"LDAP" "(Windows Active directory for Nextcloud)" OFF \
+"Notify Push" "(High Performance Files Backend for Nextcloud)" OFF \
+"FullTextSearch" "(Elasticsearch for Nextcloud [2GB RAM])" OFF \
+"Webmin" "(Server GUI like Cpanel)" "$STARTUP_SWITCH" \
+"Talk" "(Video calls and chat for Nextcloud)" OFF \
+"Extract" "(Archive extraction for Nextcloud)" OFF \
+"PreviewGenerator" "(Pre-generate previews for Nextcloud)" "$STARTUP_SWITCH" \
 "Netdata" "(Real-time server monitoring in Web GUI)" OFF \
 "BPYTOP" "(Real-time server monitoring in CLI)" OFF \
+"ClamAV" "(Antivirus for Nextcloud and files)" OFF \
 "Midnight Commander" "(CLI file manager)" OFF \
-"FullTextSearch" "(Elasticsearch for Nextcloud [2GB RAM])" OFF \
-"PreviewGenerator" "(Pre-generate previews for Nextcloud)" "$STARTUP_SWITCH" \
-"LDAP" "(Windows Active directory for Nextcloud)" OFF \
-"Talk" "(Video calls and chat for Nextcloud)" OFF \
-"Webmin" "(Server GUI like Cpanel)" "$STARTUP_SWITCH" \
+"Pico CMS" "(Leightweight CMS integration in Nextcloud)" OFF \
+"Whiteboard" "(Whiteboard for Nextcloud)" OFF \
+"Face Recognition" "(Scan your photos for faces in Nextcloud)" OFF \
 "SMB-mount" "(Mount SMB-shares from your local network)" OFF 3>&1 1>&2 2>&3)
 
 case "$choice" in
@@ -74,6 +79,10 @@ case "$choice" in
         print_text_in_color "$ICyan" "Downloading the ClamAV script..."
         run_script APP clamav
     ;;&
+    *"Extract"*)
+        print_text_in_color "$ICyan" "Downloading the Extract script..."
+        run_script APP extract
+    ;;&
     *"Netdata"*)
         print_text_in_color "$ICyan" "Downloading the Netdata script..."
         run_script APP netdata
@@ -86,13 +95,25 @@ case "$choice" in
         print_text_in_color "$ICyan" "Downloading the Midnight Commander script..."
         run_script APP midnight-commander
     ;;&
+    *"Face Recognition"*)
+        print_text_in_color "$ICyan" "Downloading the Face Recognition script..."
+        run_script APP face-recognition
+    ;;&
     *"FullTextSearch"*)
         print_text_in_color "$ICyan" "Downloading the FullTextSearch script..."
         run_script APP fulltextsearch
     ;;&
+    *"Pico CMS"*)
+        print_text_in_color "$ICyan" "Downloading the Pico CMS script..."
+        run_script APP pico_cms
+    ;;&
     *"PreviewGenerator"*)
         print_text_in_color "$ICyan" "Downloading the PreviewGenerator script..."
         run_script APP previewgenerator
+    ;;&
+    *"Notify Push"*)
+        print_text_in_color "$ICyan" "Downloading the Notify Push script..."
+        run_script APP notify_push
     ;;&
     *"LDAP"*)
         SUBTITLE="LDAP"
@@ -112,6 +133,10 @@ to finish the setup once this script is done." "$SUBTITLE"
     *"Webmin"*)
         print_text_in_color "$ICyan" "Downloading the Webmin script..."
         run_script APP webmin
+    ;;&
+    *"Whiteboard"*)
+        print_text_in_color "$ICyan" "Downloading the Whiteboard script..."
+        run_script APP whiteboard
     ;;&
     *"SMB-mount"*)
         print_text_in_color "$ICyan" "Downloading the SMB-mount script..."
